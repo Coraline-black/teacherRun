@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Бабушка в школьном коридоре</title>
+
+<style>
+body {
+  margin: 0;
+  background: black;
+  overflow: hidden;
+  font-family: Arial, sans-serif;
+}
+
+canvas {
+  display: block;
+  margin: auto;
+}
+
+#ui {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  color: white;
+  font-size: 16px;
+  text-shadow: 1px 1px 2px black;
+}
+
+#gameover {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.85);
+  color: white;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+}
+
+button {
+  padding: 10px 20px;
+  font-size: 16px;
+}
+</style>
+</head>
+<body>
+
+<div id="ui">
+  Очки: <span id="score">0</span><br>
+  Дистанция: <span id="dist">0</span>
+</div>
+
+<div id="gameover">
+  <h1>Игра окончена</h1>
+  <p>Очки: <span id="finalScore"></span></p>
+  <button onclick="restart()">Заново</button>
+</div>
+
+<canvas id="game" width="420" height="640"></canvas>
+
+<script>
+// ================= CANVAS =================
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+// ================= ПОЛОСЫ =================
+const lanes = [110, 190, 270];
+
+// ================= ИЗОБРАЖЕНИЯ =================
+const background = new Image();
+background.src = "background.png";
+
+const grandma = new Image();
+grandma.src = "grandma.png";
+
+const bookImg = new Image();
+bookImg.src = "book.png";
+
+// ================= ФОН (движение) =================
+let bgY1 = 0;
+let bgY2 = -canvas.height;
+
+// ================= СОСТОЯНИЕ ИГРЫ =================
+let speed = 3;
+let score = 0;
+let distance = 0;
+let running = true;
+
+// ================= ИГРОК =================
+const player = {
+  lane: 1,
+  y: 440,
+  vy: 0,
+  state: "run"
+};
+
+// ================= ОБЪЕКТЫ =================
+let books = [];
+let obstacles = [];
+
+// ================= УПРАВЛЕНИЕ (ПК) =================
+document.addEventListener("keydown", e => {
+  if (!running) return;
+
+  if ((e.key === "ArrowLeft" || e.key === "a") && player.lane > 0) player.lane--;
+  if ((e.key === "ArrowRight" || e.key === "d") && player.lane < 2) player.lane++;
+
+  if ((e.key === "ArrowUp" || e.key === " " || e.key === "w") && player.state === "run") {
+    player.vy = -16;
+    player.state = "jump";
+  }
+
+  if ((e.key === "ArrowDown" || e.key === "s") && player.state === "run") {
+    player.state = "slide";
+    setTimeout(() => player.state = "run", 600);
+  }
+});
+
+// ================= УПРАВЛЕНИЕ (ТАЧ) =================
+let sx = 0, sy = 0;
+
+canvas.addEventListener("touchstart", e => {
+  sx = e.touches[0].clientX;
+  sy = e.touches[0].clientY;
+});
+
+canvas.addEventListener("touchend", e => {
+  let dx = e.changedTouches[0].clientX - sx;
+  let dy = e.changedTouches[0].clientY - sy;
+
+  if (Math.abs(dx) > Math.abs(dy)) {
+    if (dx > 30 && player.lane < 2) player.lane++;
+    if (dx < -30 && player.lane > 0) player.lane--;
+  } else {
+    if (dy < -30 && player.state === "run") {
+      player.vy = -16;
+      player.state = "jump";
+    }
+    if (dy > 30 && player.state === "run") {
+      player.state = "slide";
+      setTimeout(() => player.state = "run", 600);
+    }
+  }
+});
+
+// ================= ГЕНЕРАЦИЯ =================
+function spawnBook() {
+  books.push({
+    lane: Math.floor(Math.random() * 3),
+    y: -30
+  });
+}
+
+function spawnObstacle() {
+  obstacles.push({
+    lane: Math.floor(Math.random() * 3),
+    y: -60,
+    type: Math.random() > 0.5 ? "low" : "high"
+  });
+}
+
+// ================= ОБНОВЛЕНИЕ =================
+function update() {
+  if (!running) return;
+
+  speed += 0.0006;
+  distance += speed * 0.1;
+
+  // движение фона
+  bgY1 += speed;
+  bgY2 += speed;
+  if (bgY1 >= canvas.height) bgY1 = bgY2 - canvas.height;
+  if (bgY2 >= canvas.height) bgY2 = bgY1 - canvas.height;
+
+  // прыжок
+  player.y += player.vy;
+  player.vy += 1;
+
+  if (player.y >= 440) {
+    player.y = 440;
+    player.vy = 0;
+    if (player.state === "jump") player.state = "run";
+  }
+
+  books.forEach(b => b.y += speed);
+  obstacles.forEach(o => o.y += speed);
+
+  books = books.filter(b => b.y < 700);
+  obstacles = obstacles.filter(o => o.y < 700);
+
+  // сбор учебников
+  books.forEach((b, i) => {
+    if (b.lane === player.lane && Math.abs(b.y - player.y) < 35) {
+      score++;
+      books.splice(i, 1);
+    }
+  });
+
+  // столкновения
+  obstacles.forEach(o => {
+    if (o.lane === player.lane && Math.abs(o.y - player.y) < 40) {
+      if (
+        (o.type === "low" && player.state !== "jump") ||
+        (o.type === "high" && player.state !== "slide")
+      ) {
+        endGame();
+      }
+    }
+  });
+
+  if (Math.random() < 0.03) spawnBook();
+  if (Math.random() < 0.02) spawnObstacle();
+
+  document.getElementById("score").textContent = score;
+  document.getElementById("dist").textContent = Math.floor(distance);
+}
+
+// ================= ОТРИСОВКА =================
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // фон (школьный коридор)
+  ctx.drawImage(background, 0, bgY1, canvas.width, canvas.height);
+  ctx.drawImage(background, 0, bgY2, canvas.width, canvas.height);
+
+  // бабушка
+  let h = player.state === "slide" ? 50 : 80;
+  ctx.drawImage(
+    grandma,
+    lanes[player.lane] - 20,
+    player.y + (80 - h),
+    80,
+    h
+  );
+
+  // учебники
+  books.forEach(b => {
+    ctx.drawImage(bookImg, lanes[b.lane], b.y, 40, 30);
+  });
+
+  // препятствия
+  obstacles.forEach(o => {
+    ctx.fillStyle = o.type === "low" ? "#5a3b1e" : "#7a1e1e";
+    ctx.fillRect(lanes[o.lane], o.y, 40, 40);
+  });
+}
+
+// ================= GAME OVER =================
+function endGame() {
+  running = false;
+  document.getElementById("finalScore").textContent = score;
+  document.getElementById("gameover").style.display = "flex";
+}
+
+function restart() {
+  speed = 3;
+  score = 0;
+  distance = 0;
+  books = [];
+  obstacles = [];
+  running = true;
+  document.getElementById("gameover").style.display = "none";
+}
+
+// ================= ЦИКЛ =================
+function loop() {
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+
+</body>
+</html>
